@@ -1054,7 +1054,10 @@ stop_rr_fcf_flogi:
 					lpfc_sli4_unreg_all_rpis(vport);
 				}
 			}
-			lpfc_issue_reg_vfi(vport);
+
+			/* Do not register VFI if the driver aborted FLOGI */
+			if (!lpfc_error_lost_link(irsp))
+				lpfc_issue_reg_vfi(vport);
 			lpfc_nlp_put(ndlp);
 			goto out;
 		}
@@ -1978,6 +1981,9 @@ lpfc_issue_els_plogi(struct lpfc_vport *vport, uint32_t did, uint8_t retry)
 
 	if (sp->cmn.fcphHigh < FC_PH3)
 		sp->cmn.fcphHigh = FC_PH3;
+
+	sp->cmn.valid_vendor_ver_level = 0;
+	memset(sp->vendorVersion, 0, sizeof(sp->vendorVersion));
 
 	lpfc_debugfs_disc_trc(vport, LPFC_DISC_TRC_ELS_CMD,
 		"Issue PLOGI:     did:x%x",
@@ -3963,6 +3969,9 @@ lpfc_els_rsp_acc(struct lpfc_vport *vport, uint32_t flag,
 		} else {
 			memcpy(pcmd, &vport->fc_sparam,
 			       sizeof(struct serv_parm));
+
+			sp->cmn.valid_vendor_ver_level = 0;
+			memset(sp->vendorVersion, 0, sizeof(sp->vendorVersion));
 		}
 
 		lpfc_debugfs_disc_trc(vport, LPFC_DISC_TRC_ELS_RSP,

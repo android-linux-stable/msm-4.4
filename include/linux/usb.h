@@ -332,6 +332,7 @@ struct usb_host_bos {
 	struct usb_ss_container_id_descriptor	*ss_id;
 	struct usb_config_summary_descriptor	*config_summary;
 	unsigned int	num_config_summary_desc;
+	struct usb_ptm_cap_descriptor	*ptm_cap;
 };
 
 int __usb_get_extra_descriptor(char *buffer, unsigned size,
