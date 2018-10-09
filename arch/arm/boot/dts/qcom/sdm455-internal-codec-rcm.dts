@@ -1,4 +1,4 @@
-/* Copyright (c) 2015-2018, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2018, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -10,14 +10,17 @@
  * GNU General Public License for more details.
  */
 
-#ifndef _NET_CNSS_PREALLOC_H_
-#define _NET_CNSS_PREALLOC_H_
 
-#define WCNSS_PRE_ALLOC_GET_THRESHOLD (4*1024)
+/dts-v1/;
 
-extern void *wcnss_prealloc_get(size_t size);
-extern int wcnss_prealloc_put(void *ptr);
-extern int wcnss_pre_alloc_reset(void);
-void wcnss_prealloc_check_memory_leak(void);
+#include "sdm455.dtsi"
+#include "sdm455-rcm.dtsi"
+#include "sdm660-internal-codec.dtsi"
 
-#endif /* _NET_CNSS__PREALLOC_H_ */
+/ {
+	model = "Qualcomm Technologies, Inc. SDM455 Int. Audio Codec RCM";
+	compatible = "qcom,sdm630-cdp", "qcom,sdm630", "qcom,cdp";
+	qcom,board-id = <21 1>;
+	qcom,pmic-id = <0x0001001b 0x0101011a 0x0 0x0>,
+			<0x0001001b 0x0201011a 0x0 0x0>;
+};
