@@ -1,4 +1,4 @@
-/* Copyright (c) 2015-2017, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2015-2017, 2019, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -2315,19 +2315,20 @@ bool hdcp1_check_if_supported_load_app(void)
 
 	/* start hdcp1 app */
 	if (hdcp1_supported && !hdcp1_handle->qsee_handle) {
+		mutex_init(&hdcp1_ta_cmd_lock);
 		rc = qseecom_start_app(&hdcp1_handle->qsee_handle,
 				HDCP1_APP_NAME,
 				QSEECOM_SBUFF_SIZE);
 		if (rc) {
 			pr_err("hdcp1 qseecom_start_app failed %d\n", rc);
 			hdcp1_supported = false;
+			hdcp1_srm_supported = false;
 			kfree(hdcp1_handle);
 		}
 	}
 
 	/* if hdcp1 app succeeds load SRM TA as well */
 	if (hdcp1_supported && !hdcp1_handle->srm_handle) {
-		mutex_init(&hdcp1_ta_cmd_lock);
 		rc = qseecom_start_app(&hdcp1_handle->srm_handle,
 				SRMAPP_NAME,
 				QSEECOM_SBUFF_SIZE);
@@ -2559,8 +2560,10 @@ int hdcp1_set_enc(bool enable)
 
 	hdcp1_qsee_handle = hdcp1_handle->qsee_handle;
 
-	if (!hdcp1_qsee_handle)
-		return -EINVAL;
+	if (!hdcp1_qsee_handle) {
+		rc = -EINVAL;
+		goto end;
+	}
 
 	if (hdcp1_enc_enabled == enable) {
 		pr_info("already %s\n", enable ? "enabled" : "disabled");
