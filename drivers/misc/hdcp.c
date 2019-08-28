@@ -2444,6 +2444,10 @@ int hdcp1_validate_receiver_ids(struct hdcp_srm_device_id_t *device_ids,
 	int i = 0;
 	struct qseecom_handle *hdcp1_srmhandle;
 
+	/* do not proceed further if no device connected */
+	if (device_id_cnt == 0)
+		goto end;
+
 	/* If client has not been registered return */
 	if (!hdcp1_supported || !hdcp1_handle)
 		return -EINVAL;
