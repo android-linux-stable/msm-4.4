@@ -4083,11 +4083,15 @@ static int mdss_fb_set_par(struct fb_info *info)
 			mfd->panel_reconfig = true;
 	}
 
+	if (mdss_fb_is_hdmi_primary(mfd) && mfd->panel_reconfig)
+		mfd->force_null_commit = true;
+
 	if (mfd->panel_reconfig || (mfd->fb_imgType != old_imgType)) {
 		mdss_fb_blank_sub(FB_BLANK_POWERDOWN, info, mfd->op_enable);
 		mdss_fb_var_to_panelinfo(var, mfd->panel_info);
 		mdss_fb_blank_sub(FB_BLANK_UNBLANK, info, mfd->op_enable);
 		mfd->panel_reconfig = false;
+		mfd->force_null_commit = false;
 	}
 
 	return ret;
