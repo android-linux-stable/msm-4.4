@@ -2379,13 +2379,19 @@ int hdcp1_set_keys(uint32_t *aksv_msb, uint32_t *aksv_lsb)
 	if (aksv_msb == NULL || aksv_lsb == NULL)
 		return -EINVAL;
 
-	if (!hdcp1_supported || !hdcp1_handle)
-		return -EINVAL;
+	mutex_lock(&hdcp1_ta_cmd_lock);
+
+	if (!hdcp1_supported || !hdcp1_handle) {
+		rc = -EINVAL;
+		goto end;
+	}
 
 	hdcp1_qsee_handle = hdcp1_handle->qsee_handle;
 
-	if (!hdcp1_qsee_handle)
-		return -EINVAL;
+	if (!hdcp1_qsee_handle) {
+		rc = -EINVAL;
+		goto end;
+	}
 
 	/* set keys and request aksv */
 	key_set_req = (struct hdcp1_key_set_req *)hdcp1_qsee_handle->sbuf;
@@ -2401,13 +2407,15 @@ int hdcp1_set_keys(uint32_t *aksv_msb, uint32_t *aksv_lsb)
 
 	if (rc < 0) {
 		pr_err("qseecom cmd failed err=%d\n", rc);
-		return -ENOKEY;
+		rc = -ENOKEY;
+		goto end;
 	}
 
 	rc = key_set_rsp->ret;
 	if (rc) {
 		pr_err("set key cmd failed, rsp=%d\n", key_set_rsp->ret);
-		return -ENOKEY;
+		rc = -ENOKEY;
+		goto end;
 	}
 
 	/* copy bytes into msb and lsb */
@@ -2420,7 +2428,9 @@ int hdcp1_set_keys(uint32_t *aksv_msb, uint32_t *aksv_lsb)
 	*aksv_lsb |= key_set_rsp->ksv[6] << 8;
 	*aksv_lsb |= key_set_rsp->ksv[7];
 
-	return 0;
+end:
+	mutex_unlock(&hdcp1_ta_cmd_lock);
+	return rc;
 }
 
 int hdcp1_validate_receiver_ids(struct hdcp_srm_device_id_t *device_ids,
