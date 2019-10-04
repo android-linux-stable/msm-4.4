@@ -2557,7 +2557,8 @@ static int qseecom_unmap_ion_allocated_memory(struct qseecom_dev_handle *data)
 	if (!IS_ERR_OR_NULL(data->client.ihandle)) {
 		ion_unmap_kernel(qseecom.ion_clnt, data->client.ihandle);
 		ion_free(qseecom.ion_clnt, data->client.ihandle);
-		data->client.ihandle = NULL;
+		memset((void *)&data->client,
+			0, sizeof(struct qseecom_client_handle));
 	}
 	return ret;
 }
@@ -3289,6 +3290,33 @@ int __boundary_checks_offset(struct qseecom_send_modfd_cmd_req *req,
 	return 0;
 }
 
+static int __boundary_checks_offset_64(struct qseecom_send_modfd_cmd_req *req,
+			struct qseecom_send_modfd_listener_resp *lstnr_resp,
+			struct qseecom_dev_handle *data, int i)
+{
+
+	if ((data->type != QSEECOM_LISTENER_SERVICE) &&
+						(req->ifd_data[i].fd > 0)) {
+		if ((req->cmd_req_len < sizeof(uint64_t)) ||
+			(req->ifd_data[i].cmd_buf_offset >
+			req->cmd_req_len - sizeof(uint64_t))) {
+			pr_err("Invalid offset (req len) 0x%x\n",
+				req->ifd_data[i].cmd_buf_offset);
+			return -EINVAL;
+		}
+	} else if ((data->type == QSEECOM_LISTENER_SERVICE) &&
+					(lstnr_resp->ifd_data[i].fd > 0)) {
+		if ((lstnr_resp->resp_len < sizeof(uint64_t)) ||
+			(lstnr_resp->ifd_data[i].cmd_buf_offset >
+			lstnr_resp->resp_len - sizeof(uint64_t))) {
+			pr_err("Invalid offset (lstnr resp len) 0x%x\n",
+				lstnr_resp->ifd_data[i].cmd_buf_offset);
+			return -EINVAL;
+		}
+	}
+	return 0;
+}
+
 static int __qseecom_update_cmd_buf(void *msg, bool cleanup,
 			struct qseecom_dev_handle *data)
 {
@@ -3646,7 +3674,8 @@ static int __qseecom_update_cmd_buf_64(void *msg, bool cleanup,
 		sg = sg_ptr->sgl;
 		if (sg_ptr->nents == 1) {
 			uint64_t *update_64bit;
-			if (__boundary_checks_offset(req, lstnr_resp, data, i))
+			if (__boundary_checks_offset_64(req, lstnr_resp,
+						data, i))
 				goto err;
 				/* 64bit app uses 64bit address */
 			update_64bit = (uint64_t *) field;
@@ -7305,6 +7334,13 @@ long qseecom_ioctl(struct file *file, unsigned cmd, unsigned long arg)
 		break;
 	}
 	case QSEECOM_IOCTL_APP_LOADED_QUERY_REQ: {
+		 if ((data->type != QSEECOM_GENERIC) &&
+			(data->type != QSEECOM_CLIENT_APP)) {
+			pr_err("app loaded query req: invalid handle (%d)\n",
+						data->type);
+			ret = -EINVAL;
+			break;
+		}
 		data->type = QSEECOM_CLIENT_APP;
 		mutex_lock(&app_access_lock);
 		atomic_inc(&data->ioctl_count);
