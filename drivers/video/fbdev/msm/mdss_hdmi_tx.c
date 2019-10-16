@@ -1,4 +1,4 @@
-/* Copyright (c) 2010-2017, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2010-2017, 2019, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -3290,6 +3290,7 @@ static int hdmi_tx_power_off(struct hdmi_tx_ctrl *hdmi_ctrl)
 
 	hdmi_ctrl->panel_power_on = false;
 	hdmi_ctrl->dc_support = false;
+	hdmi_ctrl->vic = 0;
 
 	if (hdmi_ctrl->hpd_off_pending || hdmi_ctrl->panel_suspend)
 		hdmi_tx_hpd_off(hdmi_ctrl);
@@ -3742,7 +3743,8 @@ static int hdmi_tx_hdcp_off(struct hdmi_tx_ctrl *hdmi_ctrl)
 	DEV_DBG("%s: Turning off HDCP\n", __func__);
 	hdmi_ctrl->hdcp_ops->off(hdmi_ctrl->hdcp_data);
 
-	flush_delayed_work(&hdmi_ctrl->hdcp_cb_work);
+	hdmi_ctrl->hdcp_status = HDCP_STATE_INACTIVE;
+	cancel_delayed_work(&hdmi_ctrl->hdcp_cb_work);
 
 	hdmi_ctrl->hdcp_ops = NULL;
 
@@ -3990,6 +3992,16 @@ static int hdmi_tx_evt_handle_check_param(struct hdmi_tx_ctrl *hdmi_ctrl)
 		rc = 1;
 		DEV_DBG("%s: res change %d ==> %d\n", __func__,
 			hdmi_ctrl->vic, new_vic);
+	}
+
+	/*
+	 * Since bootloader doesn't support DC return 1
+	 * for panel reconfig.
+	 */
+	if (hdmi_ctrl->panel_data.panel_info.cont_splash_enabled
+			&& hdmi_tx_dc_support(hdmi_ctrl)) {
+		rc = 1;
+		DEV_DBG("%s: Bitdepth changed\n", __func__);
 	}
 end:
 	return rc;
