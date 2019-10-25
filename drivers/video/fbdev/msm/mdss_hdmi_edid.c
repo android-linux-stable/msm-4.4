@@ -51,6 +51,9 @@
 /* Support for first 5 EDID blocks */
 #define MAX_EDID_SIZE (EDID_BLOCK_SIZE * MAX_EDID_BLOCKS)
 
+/* Max refresh rate supported in Hz */
+#define MAX_REFRESH_RATE_SUPPORTED    60
+
 #define BUFF_SIZE_3D 128
 
 #define DTD_MAX			0x04
@@ -1165,8 +1168,8 @@ static void hdmi_edid_extract_extended_data_blocks(
 			break;
 		}
 
-		/* The extended data block should at least be 2 bytes long */
-		if (len < 2) {
+		/* The extended data block should at least be 1 bytes long */
+		if (len < 1) {
 			DEV_DBG("%s: invalid block size\n", __func__);
 			continue;
 		}
@@ -1712,6 +1715,9 @@ static void hdmi_edid_detail_desc(struct hdmi_edid_ctrl *edid_ctrl,
 		if (!interlaced)
 			timing.supported     = true;
 
+		if (refresh_rate > (MAX_REFRESH_RATE_SUPPORTED * khz_to_hz))
+			timing.supported     = false;
+
 		timing.ar            = aspect_ratio_4_3 ? HDMI_RES_AR_4_3 :
 					(aspect_ratio_5_4 ? HDMI_RES_AR_5_4 :
 					HDMI_RES_AR_16_9);
@@ -1823,7 +1829,8 @@ done:
 
 		if (vic == video_format) {
 			DEV_DBG("%s: vic %d already added\n", __func__, vic);
-			disp_mode_list[i].rgb_support = true;
+			if (supported)
+				disp_mode_list[i].rgb_support = true;
 			if (y420_supported)
 				disp_mode_list[i].y420_support = true;
 			return;
