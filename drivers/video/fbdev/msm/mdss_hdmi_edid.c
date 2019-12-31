@@ -51,6 +51,9 @@
 /* Support for first 5 EDID blocks */
 #define MAX_EDID_SIZE (EDID_BLOCK_SIZE * MAX_EDID_BLOCKS)
 
+/* Max refresh rate supported in Hz */
+#define MAX_REFRESH_RATE_SUPPORTED    60
+
 #define BUFF_SIZE_3D 128
 
 #define DTD_MAX			0x04
@@ -1165,8 +1168,8 @@ static void hdmi_edid_extract_extended_data_blocks(
 			break;
 		}
 
-		/* The extended data block should at least be 2 bytes long */
-		if (len < 2) {
+		/* The extended data block should at least be 1 bytes long */
+		if (len < 1) {
 			DEV_DBG("%s: invalid block size\n", __func__);
 			continue;
 		}
@@ -1370,8 +1373,10 @@ static void hdmi_edid_extract_sink_caps(struct hdmi_edid_ctrl *edid_ctrl,
 		return;
 
 	/* Max TMDS clock is in  multiples of 5Mhz. */
-	if (len >= 7)
+	if (len >= 7 && vsd[7]) {
 		edid_ctrl->sink_caps.max_pclk_in_hz = vsd[7] * 5000000;
+		DEV_DBG("%s: MaxTMDS=%dMHz\n", __func__, (u32)vsd[7] * 5);
+	}
 
 	vsd = hdmi_edid_find_hfvsdb(in_buf);
 
@@ -1384,9 +1389,13 @@ static void hdmi_edid_extract_sink_caps(struct hdmi_edid_ctrl *edid_ctrl,
 		 * the sink shall set this filed to 0. The max TMDS support
 		 * clock Rate = Max_TMDS_Character_Rates * 5Mhz.
 		 */
-		if (vsd[5] != 0)
+		if (vsd[5] != 0) {
 			edid_ctrl->sink_caps.max_pclk_in_hz =
 					vsd[5] * 5000000;
+			DEV_DBG("%s: HF-VSDB: MaxTMDS=%dMHz\n",
+					__func__, (u32)vsd[5] * 5);
+		}
+
 		edid_ctrl->sink_caps.scdc_present =
 				(vsd[6] & 0x80) ? true : false;
 		edid_ctrl->sink_caps.scramble_support =
@@ -1463,9 +1472,6 @@ static u32 hdmi_edid_extract_ieee_reg_id(struct hdmi_edid_ctrl *edid_ctrl,
 
 	DEV_DBG("%s: EDID: VSD PhyAddr=%04x\n", __func__,
 		((u32)vsd[4] << 8) + (u32)vsd[5]);
-
-	if (len >= 7)
-		DEV_DBG("%s: MaxTMDS=%dMHz\n", __func__, (u32)vsd[7] * 5);
 
 	edid_ctrl->physical_address = ((u16)vsd[4] << 8) + (u16)vsd[5];
 
@@ -1709,6 +1715,9 @@ static void hdmi_edid_detail_desc(struct hdmi_edid_ctrl *edid_ctrl,
 		if (!interlaced)
 			timing.supported     = true;
 
+		if (refresh_rate > (MAX_REFRESH_RATE_SUPPORTED * khz_to_hz))
+			timing.supported     = false;
+
 		timing.ar            = aspect_ratio_4_3 ? HDMI_RES_AR_4_3 :
 					(aspect_ratio_5_4 ? HDMI_RES_AR_5_4 :
 					HDMI_RES_AR_16_9);
@@ -1820,7 +1829,8 @@ done:
 
 		if (vic == video_format) {
 			DEV_DBG("%s: vic %d already added\n", __func__, vic);
-			disp_mode_list[i].rgb_support = true;
+			if (supported)
+				disp_mode_list[i].rgb_support = true;
 			if (y420_supported)
 				disp_mode_list[i].y420_support = true;
 			return;

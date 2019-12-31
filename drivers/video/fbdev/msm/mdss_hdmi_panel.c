@@ -1,4 +1,4 @@
-/* Copyright (c) 2010-2017, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2010-2017, 2019, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -137,10 +137,21 @@ enum {
 	DATA_BYTE_13,
 };
 
+enum hdmi_colorimetry {
+	HDMI_COLORIMETRY_DEFAULT,
+	HDMI_COLORIMETRY_ITU_R_601,
+	HDMI_COLORIMETRY_ITU_R_709
+};
+
 enum hdmi_quantization_range {
 	HDMI_QUANTIZATION_DEFAULT,
 	HDMI_QUANTIZATION_LIMITED_RANGE,
 	HDMI_QUANTIZATION_FULL_RANGE
+};
+
+enum hdmi_ycc_quantization_range {
+	HDMI_YCC_QUANTIZATION_LIMITED_RANGE,
+	HDMI_YCC_QUANTIZATION_FULL_RANGE
 };
 
 enum hdmi_scaling_info {
@@ -189,12 +200,29 @@ static int hdmi_panel_config_avi(struct hdmi_panel *panel)
 	avi->bar_info.start_of_right_bar = timing->active_h + 1;
 
 	avi->act_fmt_info_present = true;
-	avi->rgb_quantization_range = HDMI_QUANTIZATION_DEFAULT;
-	avi->yuv_quantization_range = HDMI_QUANTIZATION_DEFAULT;
+	if (pinfo->is_ce_mode) {
+		avi->rgb_quantization_range =
+			HDMI_QUANTIZATION_LIMITED_RANGE;
+		avi->yuv_quantization_range =
+			HDMI_YCC_QUANTIZATION_LIMITED_RANGE;
+	} else {
+		avi->rgb_quantization_range =
+			HDMI_QUANTIZATION_FULL_RANGE;
+		avi->yuv_quantization_range =
+			HDMI_YCC_QUANTIZATION_FULL_RANGE;
+	}
 
 	avi->scaling_info = HDMI_SCALING_NONE;
 
-	avi->colorimetry_info = 0;
+	if (avi->pixel_format == MDP_Y_CBCR_H2V2) {
+		if (pinfo->yres < 720)
+			avi->colorimetry_info = HDMI_COLORIMETRY_ITU_R_601;
+		else
+			avi->colorimetry_info = HDMI_COLORIMETRY_ITU_R_709;
+	} else {
+		avi->colorimetry_info = HDMI_COLORIMETRY_DEFAULT;
+	}
+
 	avi->ext_colorimetry_info = 0;
 
 	avi->pixel_rpt_factor = 0;
@@ -602,13 +630,29 @@ end:
 	return rc;
 }
 
+static inline int get_bitdepth(enum hdmi_deep_color_depth bitdepth)
+{
+	switch (bitdepth) {
+	case HDMI_DEEP_COLOR_DEPTH_24BPP:
+		return 24;
+	case HDMI_DEEP_COLOR_DEPTH_30BPP:
+		return 30;
+	case HDMI_DEEP_COLOR_DEPTH_36BPP:
+		return 36;
+	default:
+		return 0;
+	}
+}
+
 static int hdmi_panel_setup_dc(struct hdmi_panel *panel)
 {
 	u32 hdmi_ctrl_reg;
 	u32 vbi_pkt_reg;
 	int rc = 0;
 
-	pr_debug("Deep Color: %s\n", panel->data->dc_enable ? "ON" : "OFF");
+	pr_debug("Deep Color: %s, bitdepth = %d\n",
+			panel->data->dc_enable ? "ON" : "OFF",
+			get_bitdepth(panel->data->bitdepth));
 
 	/* enable deep color if supported */
 	if (panel->data->dc_enable) {
