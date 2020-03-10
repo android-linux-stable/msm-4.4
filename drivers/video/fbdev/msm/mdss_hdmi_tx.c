@@ -125,6 +125,8 @@ static int hdmi_tx_enable_pll_update(struct hdmi_tx_ctrl *hdmi_ctrl,
 static void hdmi_tx_hpd_polarity_setup(struct hdmi_tx_ctrl *hdmi_ctrl,
 		bool polarity);
 static int hdmi_tx_notify_events(struct hdmi_tx_ctrl *hdmi_ctrl, int val);
+static void hdmi_panel_update_colorimetry(struct hdmi_tx_ctrl *ctrl,
+		bool use_bt2020);
 
 static struct mdss_hw hdmi_tx_hw = {
 	.hw_ndx = MDSS_HW_HDMI,
@@ -308,7 +310,7 @@ static inline bool hdmi_tx_metadata_type_one(struct hdmi_tx_ctrl *hdmi_ctrl)
 	return hdr_data->metadata_type_one;
 }
 
-static inline bool hdmix_tx_sink_dc_support(struct hdmi_tx_ctrl *hdmi_ctrl)
+static inline bool hdmi_tx_sink_dc_support(struct hdmi_tx_ctrl *hdmi_ctrl)
 {
 	void *edid_fd = hdmi_tx_get_fd(HDMI_TX_FEAT_EDID);
 
@@ -328,8 +330,7 @@ static inline bool hdmi_tx_dc_support(struct hdmi_tx_ctrl *hdmi_ctrl)
 		true);
 
 	return hdmi_ctrl->dc_feature_on &&
-		hdmi_ctrl->dc_support &&
-		hdmix_tx_sink_dc_support(hdmi_ctrl) &&
+		hdmi_tx_sink_dc_support(hdmi_ctrl) &&
 		(tmds_clk_with_dc <= hdmi_edid_get_max_pclk(edid_fd));
 }
 
@@ -1343,9 +1344,13 @@ static ssize_t hdmi_tx_sysfs_wta_hdr_stream(struct device *dev,
 	hdr_op = hdmi_hdr_get_ops(ctrl->curr_hdr_state,
 					ctrl->hdr_ctrl.hdr_state);
 
-	if (hdr_op == HDR_SEND_INFO)
+	if (hdr_op == HDR_SEND_INFO) {
 		hdmi_panel_set_hdr_infoframe(ctrl);
-	else if (hdr_op == HDR_CLEAR_INFO)
+		if (ctrl->hdr_ctrl.hdr_stream.eotf)
+			hdmi_panel_update_colorimetry(ctrl, true);
+		else
+			hdmi_panel_update_colorimetry(ctrl, false);
+	} else if (hdr_op == HDR_CLEAR_INFO)
 		hdmi_panel_clear_hdr_infoframe(ctrl);
 
 	ctrl->curr_hdr_state = ctrl->hdr_ctrl.hdr_state;
@@ -3130,6 +3135,34 @@ static void hdmi_panel_clear_hdr_infoframe(struct hdmi_tx_ctrl *ctrl)
 	DSS_REG_W(io, HDMI_GEN_PKT_CTRL, packet_control);
 }
 
+static void hdmi_panel_update_colorimetry(struct hdmi_tx_ctrl *hdmi_ctrl,
+		bool use_bt2020)
+{
+	void *pdata;
+
+	if (!hdmi_ctrl) {
+		DEV_ERR("%s: invalid hdmi ctrl data\n", __func__);
+		return;
+	}
+
+	pdata = hdmi_tx_get_fd(HDMI_TX_FEAT_PANEL);
+	if (!pdata) {
+		DEV_ERR("%s: invalid panel data\n", __func__);
+		return;
+	}
+
+	/* If there is no change in colorimetry, just return */
+	if (use_bt2020 && hdmi_ctrl->use_bt2020)
+		return;
+	else if (!use_bt2020 && !hdmi_ctrl->use_bt2020)
+		return;
+
+	if (hdmi_ctrl->panel_ops.update_colorimetry)
+		hdmi_ctrl->panel_ops.update_colorimetry(pdata, use_bt2020);
+
+	hdmi_ctrl->use_bt2020 = use_bt2020;
+}
+
 static int hdmi_tx_audio_info_setup(struct platform_device *pdev,
 	struct msm_ext_disp_audio_setup_params *params)
 {
@@ -3354,7 +3387,6 @@ static int hdmi_tx_power_off(struct hdmi_tx_ctrl *hdmi_ctrl)
 	hdmi_tx_core_off(hdmi_ctrl);
 
 	hdmi_ctrl->panel_power_on = false;
-	hdmi_ctrl->dc_support = false;
 	hdmi_ctrl->vic = 0;
 
 	if (hdmi_ctrl->hpd_off_pending || hdmi_ctrl->panel_suspend)
@@ -3483,6 +3515,7 @@ static void hdmi_tx_hpd_off(struct hdmi_tx_ctrl *hdmi_ctrl)
 
 	hdmi_ctrl->hpd_initialized = false;
 	hdmi_ctrl->hpd_off_pending = false;
+	hdmi_ctrl->dc_support = false;
 
 	DEV_DBG("%s: HPD is now OFF\n", __func__);
 } /* hdmi_tx_hpd_off */
@@ -4365,6 +4398,38 @@ static int hdmi_tx_event_handler(struct mdss_panel_data *panel_data,
 	return rc;
 }
 
+static enum mdss_mdp_csc_type mdss_hdmi_get_csc_type(
+		struct mdss_panel_data *panel_data)
+{
+	struct mdss_panel_info *pinfo;
+	struct mdp_hdr_stream_ctrl *hdr_ctrl;
+	struct mdp_hdr_stream *hdr_data;
+	enum mdss_mdp_csc_type csc_type = MDSS_MDP_CSC_RGB2YUV_709L;
+
+	struct hdmi_tx_ctrl *hdmi_ctrl =
+		hdmi_tx_get_drvdata_from_panel_data(panel_data);
+
+	if (!hdmi_ctrl) {
+		DEV_ERR("%s: invalid hdmi ctrl data\n", __func__);
+		goto error;
+	}
+
+	pinfo = &hdmi_ctrl->panel_data.panel_info;
+	hdr_ctrl = &hdmi_ctrl->hdr_ctrl;
+	hdr_data = &hdr_ctrl->hdr_stream;
+
+	if ((hdr_ctrl->hdr_state == HDR_ENABLE) &&
+		(hdr_data->eotf != 0))
+		csc_type = MDSS_MDP_CSC_RGB2YUV_2020L;
+	else if (pinfo->is_ce_mode)
+		csc_type = MDSS_MDP_CSC_RGB2YUV_709L;
+	else
+		csc_type = MDSS_MDP_CSC_RGB2YUV_709FR;
+
+error:
+	return csc_type;
+}
+
 static int hdmi_tx_register_panel(struct hdmi_tx_ctrl *hdmi_ctrl)
 {
 	int rc = 0;
@@ -4375,6 +4440,7 @@ static int hdmi_tx_register_panel(struct hdmi_tx_ctrl *hdmi_ctrl)
 	}
 
 	hdmi_ctrl->panel_data.event_handler = hdmi_tx_event_handler;
+	hdmi_ctrl->panel_data.get_csc_type = mdss_hdmi_get_csc_type;
 
 	if (!hdmi_ctrl->pdata.primary)
 		hdmi_ctrl->vic = DEFAULT_VIDEO_RESOLUTION;
