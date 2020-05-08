@@ -1,4 +1,4 @@
-/* Copyright (c) 2010-2017, 2019, The Linux Foundation. All rights reserved.
+/* Copyright (c) 2010-2017,2019-2020, The Linux Foundation. All rights reserved.
  *
  * This program is free software; you can redistribute it and/or modify
  * it under the terms of the GNU General Public License version 2 and
@@ -125,6 +125,8 @@ static int hdmi_tx_enable_pll_update(struct hdmi_tx_ctrl *hdmi_ctrl,
 static void hdmi_tx_hpd_polarity_setup(struct hdmi_tx_ctrl *hdmi_ctrl,
 		bool polarity);
 static int hdmi_tx_notify_events(struct hdmi_tx_ctrl *hdmi_ctrl, int val);
+static void hdmi_panel_update_colorimetry(struct hdmi_tx_ctrl *ctrl,
+		bool use_bt2020);
 
 static struct mdss_hw hdmi_tx_hw = {
 	.hw_ndx = MDSS_HW_HDMI,
@@ -1342,9 +1344,13 @@ static ssize_t hdmi_tx_sysfs_wta_hdr_stream(struct device *dev,
 	hdr_op = hdmi_hdr_get_ops(ctrl->curr_hdr_state,
 					ctrl->hdr_ctrl.hdr_state);
 
-	if (hdr_op == HDR_SEND_INFO)
+	if (hdr_op == HDR_SEND_INFO) {
 		hdmi_panel_set_hdr_infoframe(ctrl);
-	else if (hdr_op == HDR_CLEAR_INFO)
+		if (ctrl->hdr_ctrl.hdr_stream.eotf)
+			hdmi_panel_update_colorimetry(ctrl, true);
+		else
+			hdmi_panel_update_colorimetry(ctrl, false);
+	} else if (hdr_op == HDR_CLEAR_INFO)
 		hdmi_panel_clear_hdr_infoframe(ctrl);
 
 	ctrl->curr_hdr_state = ctrl->hdr_ctrl.hdr_state;
@@ -3129,6 +3135,34 @@ static void hdmi_panel_clear_hdr_infoframe(struct hdmi_tx_ctrl *ctrl)
 	DSS_REG_W(io, HDMI_GEN_PKT_CTRL, packet_control);
 }
 
+static void hdmi_panel_update_colorimetry(struct hdmi_tx_ctrl *hdmi_ctrl,
+		bool use_bt2020)
+{
+	void *pdata;
+
+	if (!hdmi_ctrl) {
+		DEV_ERR("%s: invalid hdmi ctrl data\n", __func__);
+		return;
+	}
+
+	pdata = hdmi_tx_get_fd(HDMI_TX_FEAT_PANEL);
+	if (!pdata) {
+		DEV_ERR("%s: invalid panel data\n", __func__);
+		return;
+	}
+
+	/* If there is no change in colorimetry, just return */
+	if (use_bt2020 && hdmi_ctrl->use_bt2020)
+		return;
+	else if (!use_bt2020 && !hdmi_ctrl->use_bt2020)
+		return;
+
+	if (hdmi_ctrl->panel_ops.update_colorimetry)
+		hdmi_ctrl->panel_ops.update_colorimetry(pdata, use_bt2020);
+
+	hdmi_ctrl->use_bt2020 = use_bt2020;
+}
+
 static int hdmi_tx_audio_info_setup(struct platform_device *pdev,
 	struct msm_ext_disp_audio_setup_params *params)
 {
@@ -3482,6 +3516,8 @@ static void hdmi_tx_hpd_off(struct hdmi_tx_ctrl *hdmi_ctrl)
 	hdmi_ctrl->hpd_initialized = false;
 	hdmi_ctrl->hpd_off_pending = false;
 	hdmi_ctrl->dc_support = false;
+
+	hdmi_edid_reset_parser(hdmi_tx_get_fd(HDMI_TX_FEAT_EDID));
 
 	DEV_DBG("%s: HPD is now OFF\n", __func__);
 } /* hdmi_tx_hpd_off */
@@ -4364,6 +4400,38 @@ static int hdmi_tx_event_handler(struct mdss_panel_data *panel_data,
 	return rc;
 }
 
+static enum mdss_mdp_csc_type mdss_hdmi_get_csc_type(
+		struct mdss_panel_data *panel_data)
+{
+	struct mdss_panel_info *pinfo;
+	struct mdp_hdr_stream_ctrl *hdr_ctrl;
+	struct mdp_hdr_stream *hdr_data;
+	enum mdss_mdp_csc_type csc_type = MDSS_MDP_CSC_RGB2YUV_709L;
+
+	struct hdmi_tx_ctrl *hdmi_ctrl =
+		hdmi_tx_get_drvdata_from_panel_data(panel_data);
+
+	if (!hdmi_ctrl) {
+		DEV_ERR("%s: invalid hdmi ctrl data\n", __func__);
+		goto error;
+	}
+
+	pinfo = &hdmi_ctrl->panel_data.panel_info;
+	hdr_ctrl = &hdmi_ctrl->hdr_ctrl;
+	hdr_data = &hdr_ctrl->hdr_stream;
+
+	if ((hdr_ctrl->hdr_state == HDR_ENABLE) &&
+		(hdr_data->eotf != 0))
+		csc_type = MDSS_MDP_CSC_RGB2YUV_2020L;
+	else if (pinfo->is_ce_mode)
+		csc_type = MDSS_MDP_CSC_RGB2YUV_709L;
+	else
+		csc_type = MDSS_MDP_CSC_RGB2YUV_709FR;
+
+error:
+	return csc_type;
+}
+
 static int hdmi_tx_register_panel(struct hdmi_tx_ctrl *hdmi_ctrl)
 {
 	int rc = 0;
@@ -4374,6 +4442,7 @@ static int hdmi_tx_register_panel(struct hdmi_tx_ctrl *hdmi_ctrl)
 	}
 
 	hdmi_ctrl->panel_data.event_handler = hdmi_tx_event_handler;
+	hdmi_ctrl->panel_data.get_csc_type = mdss_hdmi_get_csc_type;
 
 	if (!hdmi_ctrl->pdata.primary)
 		hdmi_ctrl->vic = DEFAULT_VIDEO_RESOLUTION;
